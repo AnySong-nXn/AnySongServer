@@ -1,0 +1,76 @@
+# -----------------------------
+# PYTHON
+# -----------------------------
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pytest_cache/
+*.sql
+.env
+.env.*
+*.sqlite3
+
+# -----------------------------
+# FASTAPI / BUILD
+# -----------------------------
+*.db
+instance/
+uploads/
+logs/
+*.log
+
+# -----------------------------
+# LOCAL CONFIG
+# -----------------------------
+config.json
+secrets.json
+
+# -----------------------------
+# BATCH FILES
+# -----------------------------
+*.bat
+
+# -----------------------------
+# SUPABASE
+# -----------------------------
+# Lokale Supabase-Projektdateien (sollten NICHT zu Git)
+supabase/.temp/
+supabase/migrations/.temp/
+supabase/.branches/
+supabase/config.toml
+supabase/.env
+
+# -----------------------------
+# NODE / NPM
+# -----------------------------
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# -----------------------------
+# VSCODE
+# -----------------------------
+.vscode/
+.vscode/*
+*.code-workspace
+
+# -----------------------------
+# SYSTEM
+# -----------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# -----------------------------
+# PYCHARM / IDEA
+# -----------------------------
+.idea/
+*.iml
+
+# -----------------------------
+# OTHER
+# -----------------------------
+*.bak
+*.tmp

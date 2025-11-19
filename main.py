@@ -30,11 +30,17 @@ class Partitura(BaseModel):
 class Feed(BaseModel):
     songs: list[Partitura]
 
+class Assessments(BaseModel):
+    style: str | None = None
+    goal: str | None = None
+    skill: str | None = None
+
 class User(BaseModel):
     id: str
     email: str
     access_token: str
     feed: Feed
+    assessments: Assessments | None = None
 
 class ConfirmRequest(BaseModel):
     access_token: str
@@ -239,7 +245,8 @@ def signin(data: AuthRequest):
             id=user_data.id,
             email=user_data.email,
             access_token=token,
-            feed=feed
+            feed=feed,
+            assessments=None
         )
     except Exception as e:
         raise api.HTTPException(status_code=400, detail=str(e))

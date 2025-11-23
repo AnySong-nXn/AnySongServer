@@ -25,7 +25,7 @@ class Partitura(BaseModel):
     style: str
     id: str
     difficulty: int
-    percentage: int
+    popularity: int | None = None
 
 class Feed(BaseModel):
     songs: list[Partitura]
@@ -346,6 +346,7 @@ def get_feed(request: api.Request, limit: int = 20):
             style=p.get("style",""),
             id=str(p.get("id","")),
             difficulty=int(p.get("difficulty", 0) or 0),
+            popularity=int(p.get("popularity", 0) or 0),
         ))
     return Feed(songs=top)
 

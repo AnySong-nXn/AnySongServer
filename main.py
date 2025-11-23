@@ -2,6 +2,7 @@ import fastapi as api
 from supabase import create_client
 import os
 from pydantic import BaseModel
+from fastapi import Request
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 API_KEY = os.getenv("API_KEY")
@@ -10,14 +11,15 @@ supabase = create_client(SUPABASE_URL, API_KEY)
 
 app = api.FastAPI()
 
+# -------------------- Models --------------------
 class AuthRequest(BaseModel):
     email: str
     password: str
 
 class Assessments(BaseModel):
-    style: str
-    goal: str
-    skill: str
+    style: str | None = None
+    goal: str | None = None
+    skill: str | None = None
 
 class Partitura(BaseModel):
     title: str
@@ -25,27 +27,59 @@ class Partitura(BaseModel):
     style: str
     id: str
     difficulty: int
-    percentage: int
 
 class Feed(BaseModel):
     songs: list[Partitura]
-
-class Assessments(BaseModel):
-    style: str | None = None
-    goal: str | None = None
-    skill: str | None = None
 
 class User(BaseModel):
     id: str
     email: str
     access_token: str
-    feed: Feed
     assessments: Assessments | None = None
 
 class ConfirmRequest(BaseModel):
     access_token: str
     refresh_token: str | None = None
 
+# -------------------- Helpers --------------------
+def get_user_from_auth_header(request: Request):
+    auth = request.headers.get("authorization")
+    if not auth or not auth.lower().startswith("bearer "):
+        raise api.HTTPException(status_code=401, detail="Missing Authorization header")
+    token = auth.split(" ", 1)[1]
+    # validiert JWT serverseitig und liefert user object
+    user_resp = supabase.auth.get_user(token)
+    if not user_resp or getattr(user_resp, "user", None) is None:
+        raise api.HTTPException(status_code=401, detail="Invalid token")
+    return user_resp.user.id
+
+def score_partitura(part, assessment):
+    score = 0
+    # Style match
+    if assessment.get("style") and part.get("style") == assessment.get("style"):
+        score += 40
+    # Skill mapping
+    skill_to_range = {
+        "beginner": range(1,4),
+        "intermediate": range(4,7),
+        "advanced": range(7,11)
+    }
+    skill = (assessment.get("skill") or "").lower()
+    if skill and part.get("difficulty") in skill_to_range.get(skill, range(1,11)):
+        score += 30
+    # Goal as tag match (optional)
+    if assessment.get("goal"):
+        tags = part.get("tags") or ""
+        if isinstance(tags, str) and assessment.get("goal").lower() in tags.lower():
+            score += 10
+    # popularity/percentage as bonus if present
+    try:
+        score += int(part.get("popularity", 0))
+    except Exception:
+        pass
+    return score
+
+# -------------------- Confirm Flow --------------------
 @app.post("/confirm/verify")
 def confirm_verify(data: ConfirmRequest):
     try:
@@ -53,156 +87,16 @@ def confirm_verify(data: ConfirmRequest):
             access_token=data.access_token,
             refresh_token=data.refresh_token,
         )
-
         return {"status": "ok", "user_id": user.user.id}
-    
     except Exception as e:
         raise api.HTTPException(400, str(e))
 
 @app.get("/confirm", response_class=api.responses.HTMLResponse)
 def confirm_page():
-    return """
-    <html>
-    <head>
-        <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>Email Confirmed</title>
+    # (HTML wie zuvor — ausgelassen hier zur Kürze; verwende deine bestehende)
+    return "<html>...email confirmed page...</html>"
 
-        <style>
-            body {
-                background-color: #1A202C; /* scaffoldBackgroundColor */
-                color: #FFFFFF;
-                font-family: Arial, sans-serif;
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                height: 100vh;
-                margin: 0;
-            }
-
-            .card {
-                background-color: #2D3748; /* appBar + bottom bar */
-                border-radius: 16px;
-                padding: 32px;
-                max-width: 400px;
-                text-align: center;
-                box-shadow: 0 8px 20px rgba(0,0,0,0.4);
-            }
-
-            h1 {
-                color: #6B46C1; /* primaryColor */
-                font-size: 26px;
-                margin-bottom: 16px;
-            }
-
-            p {
-                color: #FFFFFFCC; /* White70 */
-                font-size: 16px;
-                margin-bottom: 16px;
-            }
-
-            .status {
-                margin-top: 20px;
-                padding: 14px;
-                border-radius: 10px;
-                font-size: 15px;
-                background-color: #1A202C;
-                border: 1px solid #6B46C1;
-                color: #E9D8FD; /* heller Lila */
-            }
-
-            .success {
-                border-color: #48BB78;
-                color: #C6F6D5;
-            }
-
-            .fail {
-                border-color: #E53E3E;
-                color: #FED7D7;
-            }
-        </style>
-    </head>
-
-    <body>
-        <div class="card">
-            <h1>Email bestätigt!</h1>
-
-            <div id="statusBox" class="status">
-                Bitte warten...
-            </div>
-        </div>
-
-        <script>
-            // Token extrahieren (# nach der URL)
-            const fragment = window.location.hash.substring(1);
-            const params = new URLSearchParams(fragment);
-
-            const access_token = params.get("access_token");
-            const refresh_token = params.get("refresh_token");
-
-            const statusBox = document.getElementById("statusBox");
-
-            async function verifyBackend() {
-                try {
-                    await fetch("/confirm/verify", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            access_token: access_token,
-                            refresh_token: refresh_token
-                        })
-                    });
-                } catch (e) {
-                    console.error("Verification failed:", e);
-                }
-            }
-
-            async function tryOpenApp() {
-                const appLink = "anysong://confirm";
-
-                // versuchen die App zu öffnen
-                window.location.href = appLink;
-
-                let opened = false;
-
-                const start = Date.now();
-
-                // Wenn Browser nach 1.2s nicht "verlassen" wurde → App existiert nicht
-                setTimeout(() => {
-                    if (Date.now() - start < 1200) {
-                        opened = true;
-                    }
-
-                    updateStatus(opened);
-                }, 1200);
-            }
-
-            function updateStatus(opened) {
-                if (opened) {
-                    statusBox.classList.add("success");
-                    statusBox.textContent =
-                        "AnySong wurde erfolgreich geöffnet! Du kannst diese Seite jetzt schließen.";
-                } else {
-                    statusBox.classList.add("fail");
-                    statusBox.textContent =
-                        "Du kannst diese Seite jetzt schließen.";
-                }
-            }
-
-            // Ablauf starten
-            if (access_token) {
-                verifyBackend().then(() => tryOpenApp());
-            } else {
-                statusBox.classList.add("fail");
-                statusBox.textContent = "Ungültiger Bestätigungslink.";
-            }
-        </script>
-    </body>
-    </html>
-    """
-
-
-
+# -------------------- Auth --------------------
 @app.get('/resend-confirm')
 def resend_confirm(data:AuthRequest):
     try:
@@ -221,7 +115,7 @@ def signup(data: AuthRequest):
         return {"user": res.user, "session": res.session, "needs_confirm": True}
     except Exception as e:
         raise api.HTTPException(status_code=400, detail=str(e))
-    
+
 @app.post("/signin")
 def signin(data: AuthRequest):
     try:
@@ -229,28 +123,83 @@ def signin(data: AuthRequest):
             "email": data.email,
             "password": data.password
         })
-
         user_data = res.user
         token = res.session.access_token
-
         if user_data is None:
             raise api.HTTPException(400, "Unknown email")
-
         if user_data.email_confirmed_at is None:
             raise api.HTTPException(403, "Please confirm your email first.")
-
-        feed = Feed(songs=[]) # da kommen die songs rein
-
-        return User(
-            id=user_data.id,
-            email=user_data.email,
-            access_token=token,
-            feed=feed,
-            assessments=None
-        )
+        return {
+            "id": user_data.id,
+            "email": user_data.email,
+            "access_token": token,
+            "assessments": None
+        }
     except Exception as e:
         raise api.HTTPException(status_code=400, detail=str(e))
-    
+
+@app.post("/user/assessment")
+def save_assessment(data: Assessments, request: Request):
+    user_id = get_user_from_auth_header(request)
+    payload = {
+        "user_id": user_id,
+        "style": data.style,
+        "goal": data.goal,
+        "skill": data.skill,
+    }
+    resp = supabase.table("assessments").upsert(payload, on_conflict="user_id").execute()
+    if getattr(resp, "error", None):
+        raise api.HTTPException(status_code=500, detail=str(resp.error))
+    return {"status": "ok"}
+
+# -------------------- NEW: Get personalized feed --------------------
+@app.get("/user/feed", response_model=Feed)
+def get_feed(request: Request, limit: int = 20):
+    user_id = get_user_from_auth_header(request)
+
+    # 1) Lese assessment
+    a_resp = supabase.table("assessments").select("*").eq("user_id", user_id).execute()
+    if getattr(a_resp, "error", None):
+        raise api.HTTPException(status_code=500, detail=str(a_resp.error))
+    assessment = a_resp.data[0] if a_resp.data else None
+
+    # 2) Fallback: keine assessment -> beliebte Partituren
+    if not assessment:
+        parts_resp = supabase.table("partituras").select("*").order("popularity", desc=True).limit(limit).execute()
+        if getattr(parts_resp, "error", None):
+            raise api.HTTPException(status_code=500, detail=str(parts_resp.error))
+        songs = [Partitura(
+            title=p.get("title",""),
+            composer=p.get("composer",""),
+            style=p.get("style",""),
+            id=str(p.get("id","")),
+            difficulty=int(p.get("difficulty", 0) or 0),
+        ) for p in parts_resp.data]
+        return Feed(songs=songs)
+
+    # 3) Bei vorhandener assessment -> alle Partituren laden und bewerten
+    parts_resp = supabase.table("partituras").select("*").execute()
+    if getattr(parts_resp, "error", None):
+        raise api.HTTPException(status_code=500, detail=str(parts_resp.error))
+
+    scored = []
+    for p in parts_resp.data:
+        s = score_partitura(p, assessment)
+        scored.append((s, p))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    top = []
+    for score_val, p in scored[:limit]:
+        top.append(Partitura(
+            title=p.get("title",""),
+            composer=p.get("composer",""),
+            style=p.get("style",""),
+            id=str(p.get("id","")),
+            difficulty=int(p.get("difficulty", 0) or 0),
+        ))
+    return Feed(songs=top)
+
+# -------------------- Root --------------------
 @app.get('/')
 def root():
     return {"message": "Welcome to the AnySong API"}

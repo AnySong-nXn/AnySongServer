@@ -250,3 +250,7 @@ def signin(data: AuthRequest):
         )
     except Exception as e:
         raise api.HTTPException(status_code=400, detail=str(e))
+    
+@app.get('/')
+def root():
+    return {"message": "Welcome to the AnySong API"}

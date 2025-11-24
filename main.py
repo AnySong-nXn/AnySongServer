@@ -278,7 +278,7 @@ def get_user_from_auth_header(request: api.Request):
 def save_assessment(data: Assessments, request: api.Request):
     user_id = get_user_from_auth_header(request)
     payload = {
-        "user_id": user_id,
+        "user_id": str(user_id),
         "style": int(data.style) if data.style is not None else None,
         "skill": int(data.skill) if data.skill is not None else None,
     }
@@ -335,7 +335,7 @@ def get_feed(request: api.Request, limit: int = 20):
         ))
     return Feed(songs=top)
 
-    
-@app.get('/')
-def root():
-    return {"message": "Welcome to the AnySong API"}
+@app.head("/")
+def root_head():
+    # Du kannst Header setzen, aber keinen Body zurückgeben
+    return api.Response(headers={"X-Welcome-Message": "Welcome to the AnySong API"})

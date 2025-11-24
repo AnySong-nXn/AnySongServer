@@ -14,11 +14,6 @@ class AuthRequest(BaseModel):
     email: str
     password: str
 
-class Assessments(BaseModel):
-    style: str
-    goal: str
-    skill: str
-
 class Partitura(BaseModel):
     title: str
     composer: str
@@ -31,15 +26,13 @@ class Feed(BaseModel):
     songs: list[Partitura]
 
 class Assessments(BaseModel):
-    style: str | None = None
-    goal: str | None = None
-    skill: str | None = None
+    style: int | None = None
+    skill: int | None = None
 
 class User(BaseModel):
     id: str
     email: str
     access_token: str
-    feed: Feed
     assessments: Assessments | None = None
 
 class ConfirmRequest(BaseModel):
@@ -239,13 +232,10 @@ def signin(data: AuthRequest):
         if user_data.email_confirmed_at is None:
             raise api.HTTPException(403, "Please confirm your email first.")
 
-        feed = Feed(songs=[]) # da kommen die songs rein
-
         return User(
             id=user_data.id,
             email=user_data.email,
             access_token=token,
-            feed=feed,
             assessments=None
         )
     except Exception as e:
@@ -253,29 +243,25 @@ def signin(data: AuthRequest):
     
 def score_partitura(part, assessment):
     score = 0
-    # Style match
-    if assessment.get("style") and part.get("style") == assessment.get("style"):
-        score += 40
-    # Skill mapping
-    skill_to_range = {
-        "beginner": range(1,4),
-        "intermediate": range(4,7),
-        "advanced": range(7,11)
-    }
-    skill = (assessment.get("skill") or "").lower()
-    if skill and part.get("difficulty") in skill_to_range.get(skill, range(1,11)):
-        score += 30
-    # Goal as tag match (optional)
-    if assessment.get("goal"):
-        tags = part.get("tags") or ""
-        if isinstance(tags, str) and assessment.get("goal").lower() in tags.lower():
-            score += 10
-    # popularity/percentage as bonus if present
-    try:
-        score += int(part.get("popularity", 0))
-    except Exception:
-        pass
+    if assessment.style:
+        if int(part.get("style","")) == int(assessment.style):
+            score += 20
+    if assessment.skill:
+        skill = int(assessment.skill)
+        difficulty = int(part.get("difficulty", 0) or 0)
+        diff = abs(skill - difficulty)
+        if diff == 0:
+            score += 20
+        elif diff == 1:
+            score += 12
+        elif diff == 2:
+            score += 6
+    
+    if part.get("popularity", 0):
+        score += min(int(part.get("popularity", 0) or 0), 100) / 5  # max 20 Punkte
+
     return score
+
 
 def get_user_from_auth_header(request: api.Request):
     auth = request.headers.get("authorization")
@@ -293,9 +279,8 @@ def save_assessment(data: Assessments, request: api.Request):
     user_id = get_user_from_auth_header(request)
     payload = {
         "user_id": user_id,
-        "style": data.style,
-        "goal": data.goal,
-        "skill": data.skill,
+        "style": int(data.style) if data.style is not None else None,
+        "skill": int(data.skill) if data.skill is not None else None,
     }
     resp = supabase.table("assessments").upsert(payload, on_conflict="user_id").execute()
     if getattr(resp, "error", None):
@@ -321,7 +306,7 @@ def get_feed(request: api.Request, limit: int = 20):
         songs = [Partitura(
             title=p.get("title",""),
             composer=p.get("composer",""),
-            style=p.get("style",""),
+            style=p.get("style", ""),
             id=str(p.get("id","")),
             difficulty=int(p.get("difficulty", 0) or 0),
         ) for p in parts_resp.data]

@@ -234,12 +234,24 @@ def signin(data: AuthRequest):
 
         if user_data.email_confirmed_at is None:
             raise api.HTTPException(403, "Please confirm your email first.")
+        
+        # Lade assessment
+        assessments = None
+        a_resp = supabase.table("assessments").select("*").eq("user_id", user_data.id).execute()
+        if getattr(a_resp, "error", None):
+            print("Error loading assessments:", a_resp.error, flush=True)
+        if a_resp.data:
+            a = a_resp.data[0]
+            assessments = Assessments(
+                style=int(a.get("style")) if a.get("style") is not None else None,
+                skill=int(a.get("skill")) if a.get("skill") is not None else None,
+            )
 
         return User(
             id=user_data.id,
             email=user_data.email,
             access_token=token,
-            assessments=None
+            assessments=assessments,
         )
     except Exception as e:
         raise api.HTTPException(status_code=400, detail=str(e))

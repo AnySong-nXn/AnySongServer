@@ -258,10 +258,10 @@ def signin(data: AuthRequest):
     
 def score_partitura(part, assessment):
     score = 0
-    if assessment.style:
+    if assessment.get("style", ""):
         if int(part.get("style","")) == int(assessment.style):
             score += 20
-    if assessment.skill:
+    if assessment.get("skill", ""):
         skill = int(assessment.skill)
         difficulty = int(part.get("difficulty", 0) or 0)
         diff = abs(skill - difficulty)

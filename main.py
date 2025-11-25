@@ -22,6 +22,9 @@ class Partitura(BaseModel):
     difficulty: int
     popularity: int | None = None
 
+    def __repr__(self):
+        return f"Partitura(title={self.title}, composer={self.composer}, style={self.style}, id={self.id}, difficulty={self.difficulty}, popularity={self.popularity})"
+
 class Feed(BaseModel):
     songs: list[Partitura]
 
@@ -333,6 +336,8 @@ def get_feed(request: api.Request, limit: int = 20):
             difficulty=int(p.get("difficulty", 0) or 0),
             popularity=int(p.get("popularity", 0) or 0),
         ))
+    print(top, flush=True)
+
     return Feed(songs=top)
 
 @app.head("/")

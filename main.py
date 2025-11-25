@@ -315,7 +315,7 @@ def get_feed(request: api.Request, limit: int = 20):
 
     # 2) Fallback: keine assessment -> beliebte Partituren
     if not assessment:
-        parts_resp = supabase.table("partituras").select("*").order("popularity", desc=True).limit(limit).execute()
+        parts_resp = supabase.table("partituras").select("*").limit(limit).execute()
         if getattr(parts_resp, "error", None):
             raise api.HTTPException(status_code=500, detail=str(parts_resp.error))
         songs = [Partitura(

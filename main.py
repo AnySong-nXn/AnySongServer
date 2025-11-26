@@ -1,5 +1,5 @@
 import fastapi as api
-from supabase import create_client
+from supabase import create_client, AuthApiError
 import os
 from pydantic import BaseModel
 
@@ -221,10 +221,20 @@ def signup(data: AuthRequest):
 @app.post("/signin")
 def signin(data: AuthRequest):
     try:
-        res = supabase.auth.sign_in_with_password({
-            "email": data.email,
-            "password": data.password
-        })
+        try: 
+            res = supabase.auth.sign_in_with_password({
+                "email": data.email,
+                "password": data.password
+            })
+        except AuthApiError as e:
+            if "JWT" in str(e):
+                supabase.auth.refresh_session()
+                res = supabase.auth.sign_in_with_password({
+                    "email": data.email,
+                    "password": data.password
+                })
+            else:
+                raise api.HTTPException(status_code=400, detail=str(e))
 
         user_data = res.user
         token = res.session.access_token

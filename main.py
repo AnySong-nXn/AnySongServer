@@ -13,6 +13,10 @@ app = api.FastAPI()
 class AuthRequest(BaseModel):
     email: str
     password: str
+    refresh_token: str | None = None
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
 
 class Partitura(BaseModel):
     title: str
@@ -36,6 +40,7 @@ class User(BaseModel):
     id: str
     email: str
     access_token: str
+    refresh_token: str
     assessments: Assessments | None = None
 
 class ConfirmRequest(BaseModel):
@@ -221,23 +226,11 @@ def signup(data: AuthRequest):
 @app.post("/signin")
 def signin(data: AuthRequest):
     try:
-        try: 
-            res = supabase.auth.sign_in_with_password({
-                "email": data.email,
-                "password": data.password
-            })
-        except AuthApiError as e:
-            if "JWT" in str(e):
-                supabase.auth.refresh_session()
-                res = supabase.auth.sign_in_with_password({
-                    "email": data.email,
-                    "password": data.password
-                })
-            else:
-                raise api.HTTPException(status_code=400, detail=str(e))
+        res = supabase.auth.sign_in_with_password({"email": data.email, "password": data.password})
 
         user_data = res.user
         token = res.session.access_token
+        refr_token = res.session.refresh_token
 
         if user_data is None:
             raise api.HTTPException(400, "Unknown email")
@@ -261,18 +254,42 @@ def signin(data: AuthRequest):
             id=user_data.id,
             email=user_data.email,
             access_token=token,
+            refresh_token=refr_token,
             assessments=assessments,
         )
     except Exception as e:
-        raise api.HTTPException(status_code=400, detail=str(e))
+        raise api.HTTPException(status_code=400, detail="Invalid credentials")
+    
+def refresh_using_token(refresh_token: str):
+    # Erst die Session setzen
+    supabase.auth.set_session(
+        access_token="",  # darf leer sein
+        refresh_token=refresh_token
+    )
+
+    # Dann erneuern
+    session = supabase.auth.refresh_session()
+    return session
+
+@app.post("/refresh")
+def refresh_token(data: RefreshTokenRequest):
+    if not data.refresh_token:
+        raise api.HTTPException(400, "Missing refresh token")
+    
+    new_session = refresh_using_token(data.refresh_token)
+    return {
+        "access_token": new_session.session.access_token,
+        "refresh_token": new_session.session.refresh_token,
+    }
+
     
 def score_partitura(part, assessment):
     score = 0
     if assessment.get("style", ""):
-        if int(part.get("style","")) == int(assessment.style):
+        if int(part.get("style","")) == int(assessment["style"]):
             score += 20
     if assessment.get("skill", ""):
-        skill = int(assessment.skill)
+        skill = int(assessment["skill"] or 0)
         difficulty = int(part.get("difficulty", 0) or 0)
         diff = abs(skill - difficulty)
         if diff == 0:
@@ -294,7 +311,10 @@ def get_user_from_auth_header(request: api.Request):
         raise api.HTTPException(status_code=401, detail="Missing Authorization header")
     token = auth.split(" ", 1)[1]
     # validiert JWT serverseitig und liefert user object
-    user_resp = supabase.auth.get_user(token)
+    try:
+        user_resp = supabase.auth.get_user(token)
+    except AuthApiError as e:
+        raise api.HTTPException(status_code=401, detail="Invalid token: " + str(e))
     if not user_resp or getattr(user_resp, "user", None) is None:
         raise api.HTTPException(status_code=401, detail="Invalid token")
     return user_resp.user.id
@@ -314,18 +334,22 @@ def save_assessment(data: Assessments, request: api.Request):
 
 # -------------------- NEW: Get personalized feed --------------------
 @app.get("/user/feed", response_model=Feed)
-def get_feed(request: api.Request, limit: int = 20):
+def get_feed(request: api.Request):
     user_id = get_user_from_auth_header(request)
+    print(f"Generating feed for user {user_id}", flush=True)
 
     # 1) Lese assessment
     a_resp = supabase.table("assessments").select("*").eq("user_id", user_id).execute()
     if getattr(a_resp, "error", None):
         raise api.HTTPException(status_code=500, detail=str(a_resp.error))
+    print("Assessment response:", a_resp, flush=True)
     assessment = a_resp.data[0] if a_resp.data else None
 
     # 2) Fallback: keine assessment -> beliebte Partituren
     if not assessment:
-        parts_resp = supabase.table("partituras").select("*").limit(limit).execute()
+        print("No assessment found, returning popular partituras", flush=True)
+        parts_resp = supabase.table("partituras").select("*").limit(20).execute()
+        print("Partituras response:", parts_resp, flush=True)
         if getattr(parts_resp, "error", None):
             raise api.HTTPException(status_code=500, detail=str(parts_resp.error))
         songs = [Partitura(
@@ -335,21 +359,24 @@ def get_feed(request: api.Request, limit: int = 20):
             id=str(p.get("id","")),
             difficulty=int(p.get("difficulty", 0) or 0),
         ) for p in parts_resp.data]
+        print("Returning songs:", songs, flush=True)
         return Feed(songs=songs)
 
     # 3) Bei vorhandener assessment -> alle Partituren laden und bewerten
     parts_resp = supabase.table("partituras").select("*").execute()
+    print("Partituras response:", parts_resp, flush=True)
     if getattr(parts_resp, "error", None):
         raise api.HTTPException(status_code=500, detail=str(parts_resp.error))
 
     scored = []
     for p in parts_resp.data:
         s = score_partitura(p, assessment)
+        print(f"Partitura {p.get('title','')} scored {s}", flush=True)
         scored.append((s, p))
 
     scored.sort(key=lambda x: x[0], reverse=True)
     top = []
-    for score_val, p in scored[:limit]:
+    for score_val, p in scored[:20]:
         top.append(Partitura(
             title=p.get("title",""),
             composer=p.get("composer",""),
@@ -358,8 +385,8 @@ def get_feed(request: api.Request, limit: int = 20):
             difficulty=int(p.get("difficulty", 0) or 0),
             popularity=int(p.get("popularity", 0) or 0),
         ))
+        print(f"Selected Partitura: {top[-1]}", flush=True)
     print(top, flush=True)
-
     return Feed(songs=top)
 
 @app.head("/")

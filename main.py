@@ -389,6 +389,17 @@ def get_feed(request: api.Request):
     print(top, flush=True)
     return Feed(songs=top)
 
+@app.get("/partitura/{partitura_id}")
+def get_partitura(partitura_id: str):
+    url = supabase.storage.from_("partituras").get_public_url(str(partitura_id)+".xml")
+    if not url:
+        raise api.HTTPException(404, "Partitura not found")
+    return {"partitura_url": url}
+
+@app.get("/")
+def root():
+    return {"message": "Welcome to the AnySong API"}
+
 @app.head("/")
 def root_head():
     # Du kannst Header setzen, aber keinen Body zurückgeben

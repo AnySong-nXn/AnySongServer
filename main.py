@@ -1,7 +1,9 @@
 import fastapi as api
+from fastapi.middleware.cors import CORSMiddleware
 from supabase import create_client, AuthApiError
 import os
 from pydantic import BaseModel
+from enum import Enum
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 API_KEY = os.getenv("API_KEY")
@@ -9,6 +11,19 @@ API_KEY = os.getenv("API_KEY")
 supabase = create_client(SUPABASE_URL, API_KEY)
 
 app = api.FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+class Visibility(Enum):
+    public = "public"
+    notlisted = "notlisted"
+    private = "private"
 
 class AuthRequest(BaseModel):
     email: str
@@ -25,6 +40,7 @@ class Partitura(BaseModel):
     id: str
     difficulty: int
     popularity: int | None = None
+    creator_id: int
 
     def __repr__(self):
         return f"Partitura(title={self.title}, composer={self.composer}, style={self.style}, id={self.id}, difficulty={self.difficulty}, popularity={self.popularity})"
@@ -285,6 +301,8 @@ def refresh_token(data: RefreshTokenRequest):
     
 def score_partitura(part, assessment):
     score = 0
+    if part.get("creator", 0) == 0:
+        score += 20
     if assessment.get("style", ""):
         if int(part.get("style","")) == int(assessment["style"]):
             score += 20
@@ -352,24 +370,30 @@ def get_feed(request: api.Request):
         print("Partituras response:", parts_resp, flush=True)
         if getattr(parts_resp, "error", None):
             raise api.HTTPException(status_code=500, detail=str(parts_resp.error))
+        data = [entry for entry in parts_resp.data if entry.get("visibility", "private") == Visibility.public.value]
+        print("Filtered public partituras:", data, flush=True)
         songs = [Partitura(
             title=p.get("title",""),
             composer=p.get("composer",""),
             style=p.get("style", ""),
             id=str(p.get("id","")),
             difficulty=int(p.get("difficulty", 0) or 0),
-        ) for p in parts_resp.data]
+            creator_id=int(p.get("creator", 0) or 0),
+            popularity=int(p.get("popularity", 0) or 0),
+        ) for p in data]
         print("Returning songs:", songs, flush=True)
         return Feed(songs=songs)
 
     # 3) Bei vorhandener assessment -> alle Partituren laden und bewerten
-    parts_resp = supabase.table("partituras").select("*").execute()
+    parts_resp = supabase.table("partituras").select("*").limit(20).execute()
     print("Partituras response:", parts_resp, flush=True)
     if getattr(parts_resp, "error", None):
         raise api.HTTPException(status_code=500, detail=str(parts_resp.error))
+    data = [entry for entry in parts_resp.data if entry.get("visibility", "private") == Visibility.public.value]
+    print("Filtered public partituras:", data, flush=True)
 
     scored = []
-    for p in parts_resp.data:
+    for p in data:
         s = score_partitura(p, assessment)
         print(f"Partitura {p.get('title','')} scored {s}", flush=True)
         scored.append((s, p))
@@ -383,6 +407,7 @@ def get_feed(request: api.Request):
             style=p.get("style",""),
             id=str(p.get("id","")),
             difficulty=int(p.get("difficulty", 0) or 0),
+            creator_id=int(p.get("creator", 0) or 0),
             popularity=int(p.get("popularity", 0) or 0),
         ))
         print(f"Selected Partitura: {top[-1]}", flush=True)
@@ -395,6 +420,59 @@ def get_partitura(partitura_id: str):
     if not url:
         raise api.HTTPException(404, "Partitura not found")
     return {"partitura_url": url}
+
+@app.get("/partituras/search/{query}", response_model=Feed)
+def search_partituras(request: api.Request, query: str):
+    resp = supabase.table("partituras")\
+        .select("*")\
+        .or_(f"title.ilike.%{query}%," +
+             f"composer.ilike.%{query}%," +
+             f"tags.ilike.%{query}%")\
+             .execute()
+    if getattr(resp, "error", None):
+        raise api.HTTPException(status_code=500, detail=str(resp.error))
+    data = [entry for entry in resp.data if entry.get("visibility", "private") == Visibility.public.value]
+    songs = [Partitura(
+        title=p.get("title",""),
+        composer=p.get("composer",""),
+        style=p.get("style",""),
+        id=str(p.get("id","")),
+        difficulty=int(p.get("difficulty", 0) or 0),
+        creator_id=int(p.get("creator", 0) or 0),
+        popularity=int(p.get("popularity", 0) or 0),
+    ) for p in data]
+
+    user_id = get_user_from_auth_header(request)
+    print(f"Generating searched feed for user {user_id}; Query: {query}", flush=True)
+    a_resp = supabase.table("assessments").select("*").eq("user_id", user_id).execute()
+    if getattr(a_resp, "error", None):
+        raise api.HTTPException(status_code=500, detail=str(a_resp.error))
+    print("Assessment response:", a_resp, flush=True)
+    assessment = a_resp.data[0] if a_resp.data else None
+
+    if assessment:
+        scored = []
+        for p in data:
+            s = score_partitura(p, assessment)
+            print(f"Partitura {p.get('title','')} scored {s}", flush=True)
+            scored.append((s, p))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        top = []
+        for score_val, p in scored:
+            top.append(Partitura(
+                title=p.get("title",""),
+                composer=p.get("composer",""),
+                style=p.get("style",""),
+                id=str(p.get("id","")),
+                difficulty=int(p.get("difficulty", 0) or 0),
+                creator_id=int(p.get("creator", 0) or 0),
+                popularity=int(p.get("popularity", 0) or 0),
+            ))
+            print(f"Selected Partitura: {top[-1]}", flush=True)
+        print(top, flush=True)
+        return Feed(songs=top)
+    return Feed(songs=songs)
 
 @app.get("/")
 def root():

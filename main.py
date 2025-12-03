@@ -175,7 +175,7 @@ def confirm_page():
             }
 
             async function tryOpenApp() {
-                const appLink = "anysong://confirm";
+                const appLink = "anysong://login";
 
                 // versuchen die App zu öffnen
                 window.location.href = appLink;

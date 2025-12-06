@@ -159,23 +159,24 @@ a:hover {
 
         // --- Backend Call ---
         async function verifyBackend() {
-            try {
-                await fetch("/confirm/verify", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        access_token,
-                        refresh_token,
-                        type
-                    })
-                });
+            const res = await fetch("/confirm/verify", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    access_token,
+                    refresh_token,
+                    type
+                })
+            });
 
-            } catch (e) {
-                console.error(e);
-                statusBox.classList.add("fail");
-                statusBox.textContent = "Verifizierung fehlgeschlagen.";
+            if (!res.ok) {
+                const text = await res.text();
+                throw new Error(`Verifizierung fehlgeschlagen: ${text}`);
             }
+
+            return await res.json(); // oder einfach return, falls kein JSON
         }
+
 
         // --- App öffnen mit Fallback ---
         async function openApp() {
@@ -232,13 +233,13 @@ a:hover {
                     actionDiv.innerHTML = "";
                     actionDiv.classList = [];
                 } else {
-                    throw new Error("Fehler beim Zurücksetzen des Passworts: " + response.statusText);
+                    throw new Error("Fehler beim Zurücksetzen des Passworts: " + response.json());
                 }
             })
             .catch(error => {
                 console.error(error);
                 statusBox.classList.add("fail");
-                statusBox.textContent = "Fehler beim Zurücksetzen des Passworts.";
+                statusBox.textContent = error;
             });
         }
 
@@ -256,17 +257,29 @@ a:hover {
         // --- Typ-spezifische Aktionen ---
         function handlePasswordReset() {
             statusBox.textContent = "Passwort-Wiederherstellung...";
-            verifyBackend().then(() => resetPassword());
+            verifyBackend().then(data => {resetPassword();}).catch(err => {
+                console.error(err);
+                statusBox.classList.add("fail");
+                statusBox.textContent = err.message;
+            });
         }
 
         function handleMagicLink() {
             statusBox.textContent = "Login erfolgreich. Öffne AnySong ...";
-            verifyBackend().then(() => openApp());
+            verifyBackend().then(data => {openApp();}).catch(err => {
+                console.error(err);
+                statusBox.classList.add("fail");
+                statusBox.textContent = err.message;
+            });
         }
 
         function handleEmailConfirm() {
             statusBox.textContent = "E-Mail bestätigt! Öffne AnySong ...";
-            verifyBackend().then(() => openApp());
+            verifyBackend().then(data => {openApp();}).catch(err => {
+                console.error(err);
+                statusBox.classList.add("fail");
+                statusBox.textContent = err.message;
+            });
         }
 
         function handleUnknown() {

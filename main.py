@@ -95,6 +95,7 @@ def confirm_verify_post(data: ConfirmRequest):
             raise api.HTTPException(400, "Invalid token")
         return {"status": "ok", "user_id": user.user.id}
     except Exception as e:
+        print(e)
         raise api.HTTPException(400, str(e))
 
 @app.get('/resend-confirm')

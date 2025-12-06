@@ -1,0 +1,304 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AnySong – Bestätigung</title>
+
+    <style>
+/* ======== Farb-Theme ======== */
+:root {
+    --bg: #1A202C;
+    --bg-card: #2D3748;
+    --primary: #6B46C1;
+    --primary-light: #E9D8FD;
+    --white: #FFFFFF;
+    --white-70: #FFFFFFCC;
+
+    --success: #48BB78;
+    --success-light: #C6F6D5;
+    --error: #E53E3E;
+    --error-light: #FED7D7;
+}
+
+/* ======== Basics ======== */
+body {
+    background-color: var(--bg);
+    color: var(--white);
+    font-family: Arial, sans-serif;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    margin: 0;
+}
+
+h1, h2, h3, h4 {
+    margin: 0 0 12px 0;
+    font-weight: 600;
+    color: var(--primary);
+}
+
+p {
+    color: var(--white-70);
+}
+
+/* ======== Card ======== */
+.card {
+    background-color: var(--bg-card);
+    border-radius: 16px;
+    padding: 32px;
+    max-width: 420px;
+    width: 90%;
+    text-align: center;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.4);
+}
+
+/* ======== Status Box ======== */
+.status {
+    margin-top: 20px;
+    padding: 14px;
+    border-radius: 10px;
+    border: 1px solid var(--primary);
+    background: var(--bg);
+    color: var(--primary-light);
+}
+
+.success {
+    border-color: var(--success);
+    color: var(--success-light);
+}
+.fail {
+    border-color: var(--error);
+    color: var(--error-light);
+}
+
+/* ======== Button ======== */
+button {
+    padding: 12px 18px;
+    margin-top: 12px;
+    background: var(--primary);
+    color: var(--white);
+    border-radius: 10px;
+    border: none;
+    font-size: 15px;
+    cursor: pointer;
+    transition: 0.2s;
+}
+button:hover {
+    background: #553C9A;
+}
+button:active {
+    transform: scale(0.97);
+}
+
+/* ======== Input ======== */
+input {
+    width: 100%;
+    padding: 12px;
+    border-radius: 10px;
+    border: 1px solid #444;
+    background: #3B4556;
+    color: var(--white);
+    outline: none;
+    font-size: 16px;
+    margin-bottom: 12px;
+}
+input:focus {
+    border-color: var(--primary);
+}
+
+/* ======== Link ======== */
+a {
+    color: var(--primary-light);
+    text-decoration: none;
+    font-weight: bold;
+}
+a:hover {
+    text-decoration: underline;
+}
+
+/* ======== Utility Klassen ======== */
+.mt-1 { margin-top: 8px; }
+.mt-2 { margin-top: 16px; }
+.mt-3 { margin-top: 24px; }
+
+.fade-in {
+    opacity: 0;
+    animation: fadeIn 0.4s forwards;
+}
+@keyframes fadeIn {
+    to { opacity: 1; }
+}
+
+    </style>
+</head>
+
+<body>
+    <div class="card">
+        <h1>AnySong</h1>
+
+        <div id="statusBox" class="status">
+            Bitte warten ...
+        </div>
+        <br>
+        <div id="action"></div>
+    </div>
+
+    <script>
+        const statusBox = document.getElementById("statusBox");
+
+        // --- Fragment parsen ---
+        const fragment = window.location.hash.substring(1);
+        const params = new URLSearchParams(fragment);
+
+        const access_token  = params.get("access_token");
+        const refresh_token = params.get("refresh_token");
+        const type          = params.get("type"); 
+        // mögliche Werte: "magiclink", "recovery", "signup", "email_change"
+
+        // --- Backend Call ---
+        async function verifyBackend() {
+            try {
+                await fetch("/confirm/verify", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        access_token,
+                        refresh_token,
+                        type
+                    })
+                });
+
+            } catch (e) {
+                console.error(e);
+                statusBox.classList.add("fail");
+                statusBox.textContent = "Verifizierung fehlgeschlagen.";
+            }
+        }
+
+        // --- App öffnen mit Fallback ---
+        async function openApp() {
+            const link = "anysong://login";
+
+            window.location.href = link;
+
+            let opened = false;
+            const start = Date.now();
+
+            setTimeout(() => {
+                if (Date.now() - start < 1200) {
+                    opened = true;
+                }
+
+                if (opened) {
+                    statusBox.classList.add("success");
+                    statusBox.textContent =
+                        "AnySong wurde geöffnet. Du kannst diese Seite jetzt schließen.";
+                } else {
+                    statusBox.classList.add("fail");
+                    statusBox.textContent =
+                        "Du kannst diese Seite jetzt schließen.";
+                }
+            }, 1200);
+        }
+
+        function resetPasswordCallback() {
+            const newPassword = document.getElementById("newPassword").value;
+            const confirmPassword = document.getElementById("confirmPassword").value;
+
+            if (newPassword !== confirmPassword) {
+                statusBox.classList.add("fail");
+                statusBox.textContent = "Passwörter stimmen nicht überein.";
+                return;
+            }
+
+            statusBox.textContent = "Setze Passwort zurück ...";
+
+            fetch("/user/password-reset/reset", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    "access_token": access_token,
+                    "refresh_token": refresh_token,
+                    "new_password": newPassword
+                })
+            })
+            .then(response => {
+                if (response.ok) {
+                    statusBox.classList.add("success");
+                    statusBox.textContent = "Passwort erfolgreich zurückgesetzt! Du kannst diese Seite jetzt schließen.";
+                    const actionDiv = document.getElementById("action");
+                    actionDiv.innerHTML = "";
+                    actionDiv.classList = [];
+                } else {
+                    throw new Error("Fehler beim Zurücksetzen des Passworts: " + response.statusText);
+                }
+            })
+            .catch(error => {
+                console.error(error);
+                statusBox.classList.add("fail");
+                statusBox.textContent = "Fehler beim Zurücksetzen des Passworts.";
+            });
+        }
+
+        function resetPassword() {
+            statusBox.textContent = "Passwort zurücksetzen ...";
+            const actionDiv = document.getElementById("action");
+            actionDiv.innerHTML = `
+    <input type="password" id="newPassword" placeholder="Neues Passwort" required /><br/>
+    <input type="password" id="confirmPassword" placeholder="Passwort bestätigen" required />
+    <button type="submit" onclick="resetPasswordCallback();">Passwort zurücksetzen</button>
+            `;
+            actionDiv.classList.add("fade-in");
+        }
+
+        // --- Typ-spezifische Aktionen ---
+        function handlePasswordReset() {
+            statusBox.textContent = "Passwort-Wiederherstellung...";
+            verifyBackend().then(() => resetPassword());
+        }
+
+        function handleMagicLink() {
+            statusBox.textContent = "Login erfolgreich. Öffne AnySong ...";
+            verifyBackend().then(() => openApp());
+        }
+
+        function handleEmailConfirm() {
+            statusBox.textContent = "E-Mail bestätigt! Öffne AnySong ...";
+            verifyBackend().then(() => openApp());
+        }
+
+        function handleUnknown() {
+            statusBox.classList.add("fail");
+            statusBox.textContent = "Ungültiger oder unbekannter Link.";
+        }
+
+        // --- Start ---
+        if (!access_token) {
+            handleUnknown();
+        } else {
+            switch (type) {
+                case "recovery":
+                    handlePasswordReset();
+                    break;
+
+                case "magiclink":
+                    handleMagicLink();
+                    break;
+
+                case "signup":
+                case "email_change":
+                    handleEmailConfirm();
+                    break;
+
+                default:
+                    handleUnknown();
+            }
+        }
+
+        // Sicherheit: Fragment aus URL entfernen
+        history.replaceState(null, document.title, window.location.pathname + window.location.search);
+    </script>
+</body>
+</html>

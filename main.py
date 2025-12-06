@@ -63,6 +63,11 @@ class ConfirmRequest(BaseModel):
     access_token: str
     refresh_token: str | None = None
 
+class PasswordResetRequest(BaseModel):
+    access_token: str
+    refresh_token: str
+    new_password: str
+
 @app.post("/confirm/verify")
 def confirm_verify(data: ConfirmRequest):
     try:
@@ -78,154 +83,29 @@ def confirm_verify(data: ConfirmRequest):
 
 @app.get("/confirm", response_class=api.responses.HTMLResponse)
 def confirm_page():
-    return """
-    <html>
-    <head>
-        <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>Email Confirmed</title>
+    with open("email.html", "r", encoding="utf-8") as f:
+        html_content = f.read()
+    return html_content
 
-        <style>
-            body {
-                background-color: #1A202C; /* scaffoldBackgroundColor */
-                color: #FFFFFF;
-                font-family: Arial, sans-serif;
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                height: 100vh;
-                margin: 0;
-            }
-
-            .card {
-                background-color: #2D3748; /* appBar + bottom bar */
-                border-radius: 16px;
-                padding: 32px;
-                max-width: 400px;
-                text-align: center;
-                box-shadow: 0 8px 20px rgba(0,0,0,0.4);
-            }
-
-            h1 {
-                color: #6B46C1; /* primaryColor */
-                font-size: 26px;
-                margin-bottom: 16px;
-            }
-
-            p {
-                color: #FFFFFFCC; /* White70 */
-                font-size: 16px;
-                margin-bottom: 16px;
-            }
-
-            .status {
-                margin-top: 20px;
-                padding: 14px;
-                border-radius: 10px;
-                font-size: 15px;
-                background-color: #1A202C;
-                border: 1px solid #6B46C1;
-                color: #E9D8FD; /* heller Lila */
-            }
-
-            .success {
-                border-color: #48BB78;
-                color: #C6F6D5;
-            }
-
-            .fail {
-                border-color: #E53E3E;
-                color: #FED7D7;
-            }
-        </style>
-    </head>
-
-    <body>
-        <div class="card">
-            <h1>Email bestätigt!</h1>
-
-            <div id="statusBox" class="status">
-                Bitte warten...
-            </div>
-        </div>
-
-        <script>
-            // Token extrahieren (# nach der URL)
-            const fragment = window.location.hash.substring(1);
-            const params = new URLSearchParams(fragment);
-
-            const access_token = params.get("access_token");
-            const refresh_token = params.get("refresh_token");
-
-            const statusBox = document.getElementById("statusBox");
-
-            async function verifyBackend() {
-                try {
-                    await fetch("/confirm/verify", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            access_token: access_token,
-                            refresh_token: refresh_token
-                        })
-                    });
-                } catch (e) {
-                    console.error("Verification failed:", e);
-                }
-            }
-
-            async function tryOpenApp() {
-                const appLink = "anysong://login";
-
-                // versuchen die App zu öffnen
-                window.location.href = appLink;
-
-                let opened = false;
-
-                const start = Date.now();
-
-                // Wenn Browser nach 1.2s nicht "verlassen" wurde → App existiert nicht
-                setTimeout(() => {
-                    if (Date.now() - start < 1200) {
-                        opened = true;
-                    }
-
-                    updateStatus(opened);
-                }, 1200);
-            }
-
-            function updateStatus(opened) {
-                if (opened) {
-                    statusBox.classList.add("success");
-                    statusBox.textContent =
-                        "AnySong wurde erfolgreich geöffnet! Du kannst diese Seite jetzt schließen.";
-                } else {
-                    statusBox.classList.add("fail");
-                    statusBox.textContent =
-                        "Du kannst diese Seite jetzt schließen.";
-                }
-            }
-
-            // Ablauf starten
-            if (access_token) {
-                verifyBackend().then(() => tryOpenApp());
-            } else {
-                statusBox.classList.add("fail");
-                statusBox.textContent = "Ungültiger Bestätigungslink.";
-            }
-        </script>
-    </body>
-    </html>
-    """
-
-
+@app.post('/confirm/verify')
+def confirm_verify_post(data: ConfirmRequest):
+    try:
+        user = supabase.auth.get_user(data.access_token)
+        if not user or getattr(user, "user", None) is None:
+            raise api.HTTPException(400, "Invalid token")
+        return {"status": "ok", "user_id": user.user.id}
+    except Exception as e:
+        raise api.HTTPException(400, str(e))
 
 @app.get('/resend-confirm')
 def resend_confirm(data:AuthRequest):
     try:
         supabase.auth.resend({
             "email": data.email,
-            "type": "signup"
+            "type": "signup",
+            "options": {
+                "redirect_to": "https://anysong.app/confirm"
+            }
         })
         return {"status": "ok", "message": "Confirmation email resent"}
     except Exception as e:
@@ -234,7 +114,7 @@ def resend_confirm(data:AuthRequest):
 @app.post("/signup")
 def signup(data: AuthRequest):
     try:
-        res = supabase.auth.sign_up({"email": data.email, "password": data.password})
+        res = supabase.auth.sign_up({"email": data.email, "password": data.password, 'options': {'email_redirect_to': 'anysongserver.onrender.com/confirm'},})
         return {"user": res.user, "session": res.session, "needs_confirm": True}
     except Exception as e:
         raise api.HTTPException(status_code=400, detail=str(e))
@@ -474,6 +354,30 @@ def search_partituras(request: api.Request, query: str):
         return Feed(songs=top)
     return Feed(songs=songs)
 
+@app.post("/user/password-reset")
+def password_reset(data: AuthRequest):
+    try:
+        supabase.auth.reset_password_email(
+            data.email
+        )
+        return {"status": "ok", "message": "Password reset email sent"}
+    except Exception as e:
+        raise api.HTTPException(status_code=400, detail=str(e))
+
+@app.post("/user/password-reset/reset")
+def password_reset_confirm(data: PasswordResetRequest):
+    try:
+        session = supabase.auth.set_session(data.access_token, data.refresh_token)
+        supabase.auth.update_user({"password": data.new_password})
+
+        return {
+            "status": "ok",
+            "message": "Password has been reset successfully"
+        }
+
+    except Exception as e:
+        print("Password reset error:", e)
+        raise api.HTTPException(status_code=400, detail=str(e))
 @app.get("/")
 def root():
     return {"message": "Welcome to the AnySong API"}
